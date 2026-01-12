@@ -1,5 +1,5 @@
 import { WASIAbi } from "../abi.js";
-import { WASIFeatureProvider } from "../options.js";
+import { type WASIFeatureProvider } from "../options.js";
 
 /**
  * Create a feature provider that provides `random_get` with `crypto` APIs as backend by default.
@@ -9,7 +9,7 @@ export function useRandom(
     randomFillSync?: (buffer: Uint8Array) => void;
   } = {},
 ): WASIFeatureProvider {
-  const randomFillSync = useOptions.randomFillSync || crypto.getRandomValues;
+  const randomFillSync = useOptions.randomFillSync || crypto.getRandomValues.bind(crypto);
   return (options, abi, memoryView) => {
     return {
       random_get: (bufferOffset: number, length: number) => {

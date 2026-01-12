@@ -1,6 +1,6 @@
 import { WASIAbi, WASIProcExit } from "./abi.js";
 export { WASIProcExit } from "./abi.js";
-import { WASIOptions } from "./options.js";
+import { type WASIOptions } from "./options.js";
 
 export * from "./features/all.js";
 export * from "./features/args.js";

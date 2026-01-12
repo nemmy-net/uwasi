@@ -1,5 +1,5 @@
 import { WASIAbi } from "../abi.js";
-import { WASIFeatureProvider, WASIOptions } from "../options.js";
+import type { WASIFeatureProvider, WASIOptions } from "../options.js";
 import { useArgs } from "./args.js";
 import { useClock } from "./clock.js";
 import { useEnviron } from "./environ.js";

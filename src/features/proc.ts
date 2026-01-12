@@ -1,5 +1,5 @@
 import { WASIAbi, WASIProcExit } from "../abi.js";
-import { WASIOptions } from "../options.js";
+import { type WASIOptions } from "../options.js";
 
 /**
  * A feature provider that provides `proc_exit` and `proc_raise` by JavaScript's exception.

@@ -1,5 +1,5 @@
 import { WASIAbi } from "../abi.js";
-import { WASIFeatureProvider, WASIOptions } from "../options.js";
+import type { WASIFeatureProvider, WASIOptions } from "../options.js";
 
 interface FdEntry {
   writev(iovs: Uint8Array[]): number;
@@ -349,7 +349,7 @@ export class MemoryFileSystem {
     if (normalizedPath === "/") return this.root;
 
     const parts = normalizedPath.split("/").filter((p) => p.length > 0);
-    let current: FSNode = this.root;
+    let current: FSNode | undefined = this.root;
 
     for (const part of parts) {
       if (current.type !== "dir") return null;
@@ -369,7 +369,7 @@ export class MemoryFileSystem {
   resolve(dir: DirectoryNode, relativePath: string): FSNode | null {
     const normalizedPath = normalizePath(relativePath);
     const parts = normalizedPath.split("/").filter((p) => p.length > 0);
-    let current: FSNode = dir;
+    let current: FSNode | undefined = dir;
 
     for (const part of parts) {
       if (part === ".") continue;
@@ -451,12 +451,12 @@ export class MemoryFileSystem {
     const parts = normalizedPath.split("/").filter((p) => p.length > 0);
     let parentDir = this.root;
     for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i];
+      const part = parts[i]!;
       if (parentDir.type !== "dir") return;
       parentDir = parentDir.entries[part] as DirectoryNode;
     }
 
-    const fileName = parts[parts.length - 1];
+    const fileName = parts[parts.length - 1]!;
     delete parentDir.entries[fileName];
   }
 }
@@ -574,7 +574,7 @@ export function useMemoryFS(
 
     function getFileFromPath(guestPath: string): OpenFile | null {
       for (const fd in files) {
-        const file = files[fd];
+        const file = files[fd]!;
         if (file.path === guestPath) return file;
       }
       return null;
@@ -732,7 +732,7 @@ export function useMemoryFS(
 
         if (pos < 0) pos = 0;
         file.position = pos;
-        view.setUint32(newOffset, pos, true);
+        view.setBigUint64(newOffset, BigInt(pos), true);
         return WASIAbi.WASI_ESUCCESS;
       },
 
