@@ -7,6 +7,8 @@ interface FdEntry {
   close(): void;
 }
 
+type DataThing = Uint8Array<ArrayBuffer>;
+
 class WritableTextProxy implements FdEntry {
   private decoder = new TextDecoder("utf-8");
   constructor(
@@ -209,7 +211,7 @@ interface DirectoryNode {
  */
 interface FileNode {
   readonly type: "file";
-  content: Uint8Array;
+  content: DataThing;
 }
 
 type CharacterDeviceNode =
@@ -268,7 +270,7 @@ export class MemoryFileSystem {
     }
   }
 
-  addFile(path: string, content: string | Uint8Array): void;
+  addFile(path: string, content: string | DataThing): void;
   addFile(path: string, content: Blob): Promise<void>;
   addFile(path: string, content: FileContent): void | Promise<void> {
     if (typeof content === "string") {
@@ -281,7 +283,7 @@ export class MemoryFileSystem {
         this.createFile(path, data);
       });
     } else {
-      this.createFile(path, content as Uint8Array);
+      this.createFile(path, content as DataThing);
       return;
     }
   }
@@ -292,7 +294,7 @@ export class MemoryFileSystem {
    * @param content Binary content of the file
    * @returns The created file node
    */
-  createFile(path: string, content: Uint8Array): FileNode {
+  createFile(path: string, content: DataThing): FileNode {
     const fileNode: FileNode = { type: "file", content };
     this.setNode(path, fileNode);
     return fileNode;
@@ -585,16 +587,15 @@ export function useMemoryFS(
       return file || null;
     }
 
-    return {
-      fd_read: (fd: number, iovs: number, iovsLen: number, nread: number) => {
+    /**
+     * Read file at `position` (if applicable)
+     * @param move Update the file's read position to `position + totalBytesRead`
+     * @param nread Pointer to size (u32) which will be set to the number of bytes read 
+     * @returns errno
+     */
+    function pread(file: OpenFile, iovs: number, iovsLen: number, position: bigint, move: boolean, nread: number): number {
         const view = memoryView();
-
         const iovViews = abi.iovViews(view, iovs, iovsLen);
-        const file = getFileFromFD(fd);
-        if (!file) {
-          return WASIAbi.WASI_ERRNO_BADF;
-        }
-
         if (file.node.type === "character" && file.node.kind === "stdio") {
           const bytesRead = file.node.entry.readv(iovViews);
           view.setUint32(nread, bytesRead, true);
@@ -612,7 +613,7 @@ export function useMemoryFS(
 
         const fileNode = file.node;
         const data = fileNode.content;
-        const available = data.byteLength - file.position;
+        const available = data.byteLength - Number(position);
         let totalRead = 0;
         if (available <= 0) {
           view.setUint32(nread, 0, true);
@@ -625,14 +626,32 @@ export function useMemoryFS(
           const bytesToRead = Math.min(buf.byteLength, available - totalRead);
           if (bytesToRead <= 0) break;
 
-          const sourceStart = file.position + totalRead;
+          const sourceStart = Number(position) + totalRead;
           const chunk = data.slice(sourceStart, sourceStart + bytesToRead);
           buf.set(chunk);
           totalRead += bytesToRead;
         }
-        file.position += totalRead;
+        if (move) {
+          file.position = Number(position) + totalRead;
+        }
         view.setUint32(nread, totalRead, true);
         return WASIAbi.WASI_ESUCCESS;
+    }
+
+    return {
+      fd_pread: (fd: number, iovs: number, iovsLen: number, offset: bigint, nread: number): number => {
+        const file = getFileFromFD(fd);
+        if (!file) {
+          return WASIAbi.WASI_ERRNO_BADF;
+        }
+        return pread(file, iovs, iovsLen, offset, false, nread)
+      },
+      fd_read: (fd: number, iovs: number, iovsLen: number, nread: number) => {
+        const file = getFileFromFD(fd);
+        if (!file) {
+          return WASIAbi.WASI_ERRNO_BADF;
+        }
+        return pread(file, iovs, iovsLen, BigInt(file.position), true, nread)
       },
 
       fd_write: (
@@ -667,7 +686,7 @@ export function useMemoryFS(
           0,
         );
         const requiredLength = pos + dataToWrite;
-        let newContent: Uint8Array;
+        let newContent: DataThing;
 
         if (requiredLength > file.node.content.byteLength) {
           newContent = new Uint8Array(requiredLength);
