@@ -547,6 +547,7 @@ export function useMemoryFS(
     const fileSystem =
       useOptions.withFileSystem || new MemoryFileSystem(wasiOptions.preopens);
     const files: { [fd: FileDescriptor]: OpenFile } = {};
+    const encoder = new TextEncoder();
 
     bindStdio(useOptions.withStdio || {}).forEach((entry, fd) => {
       files[fd] = {
@@ -585,6 +586,14 @@ export function useMemoryFS(
     function getFileFromFD(fileDescriptor: FileDescriptor): OpenFile | null {
       const file = files[fileDescriptor];
       return file || null;
+    }
+
+    function nodeToType(node: FSNode): number {
+      switch (node.type) {
+        case "character": return WASIAbi.WASI_FILETYPE_CHARACTER_DEVICE
+        case "dir": return WASIAbi.WASI_FILETYPE_DIRECTORY
+        case "file": return WASIAbi.WASI_FILETYPE_REGULAR_FILE
+      }
     }
 
     /**
@@ -652,6 +661,54 @@ export function useMemoryFS(
           return WASIAbi.WASI_ERRNO_BADF;
         }
         return pread(file, iovs, iovsLen, BigInt(file.position), true, nread)
+      },
+      /**
+       * @param bufused Pointer to usize
+       * @returns errno
+       */
+      fd_readdir: (fd: number, buf: number, buf_len: number, cookie_: bigint, bufused: number): number => {
+        const dir = getFileFromFD(fd)
+        if (!dir) return WASIAbi.WASI_ERRNO_BADF
+        if (dir.node.type != "dir") return WASIAbi.WASI_ERRNO_NOTDIR
+        
+        // Write a dirent_t followed by the name
+        /*
+        pub const dirent_t = extern struct {
+          next: dircookie_t,   // u64
+          ino: inode_t,        // u64
+          namlen: dirnamlen_t, // u32
+          type: filetype_t,    // u8
+        };
+        */
+        const keys = Object.keys(dir.node.entries)
+        const view = memoryView()
+        const u8view = new Uint8Array(view.buffer)
+        const cookie = Number(cookie_)
+        if (cookie >= keys.length) {
+          view.setUint32(bufused, 0, true)
+          return WASIAbi.WASI_ESUCCESS
+        }
+        
+        const key = keys[cookie]!
+        const node = dir.node.entries[key]!
+        var name = key
+        const slash = name.lastIndexOf('/')
+        if (slash != -1) name = name.substring(slash+1)
+        
+        const nameUtf8 = encoder.encode(name)
+        const direntSize = 24 // Includes padding
+        const entryLen = nameUtf8.length + direntSize
+        if (entryLen >= buf_len) return WASIAbi.WASI_ERRNO_INVAL
+        view.setUint32(bufused, entryLen, true)
+
+        // Write dirent_t
+        view.setBigUint64(buf, BigInt(cookie+1), true) // next:   dircookie_t
+        view.setBigUint64(buf+8, BigInt(0), true)      // ino:    inode_t
+        view.setUint32(buf+16, nameUtf8.length, true)  // namlen: dirnamlen_t
+        view.setUint8(buf+20, nodeToType(node))        // type:   filetype_t
+        // Write name
+        u8view.set(nameUtf8, buf+direntSize)
+        return WASIAbi.WASI_ESUCCESS
       },
 
       fd_write: (
@@ -771,20 +828,7 @@ export function useMemoryFS(
         const file = getFileFromFD(fd);
         if (!file) return WASIAbi.WASI_ERRNO_BADF;
 
-        let filetype: number;
-        switch (file.node.type) {
-          case "character":
-            filetype = WASIAbi.WASI_FILETYPE_CHARACTER_DEVICE;
-            break;
-          case "dir":
-            filetype = WASIAbi.WASI_FILETYPE_DIRECTORY;
-            break;
-          case "file":
-            filetype = WASIAbi.WASI_FILETYPE_REGULAR_FILE;
-            break;
-        }
-
-        abi.writeFdstat(view, buf, filetype, 0);
+        abi.writeFdstat(view, buf, nodeToType(file.node), 0);
         return WASIAbi.WASI_ESUCCESS;
       },
 
