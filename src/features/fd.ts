@@ -646,6 +646,51 @@ export function useMemoryFS(
         view.setUint32(nread, totalRead, true);
         return WASIAbi.WASI_ESUCCESS;
     }
+    function pwrite(file: OpenFile, iovs: number, iovsLen: number, offset: number, nwritten: number, move: boolean): number {
+        const view = memoryView();
+        const iovViews = abi.iovViews(view, iovs, iovsLen);
+        let totalWritten = 0;
+
+        if (file.node.type === "character" && file.node.kind === "stdio") {
+          const bytesWritten = file.node.entry.writev(iovViews);
+          view.setUint32(nwritten, bytesWritten, true);
+          return WASIAbi.WASI_ESUCCESS;
+        }
+
+        if (file.node.type === "dir") return WASIAbi.WASI_ERRNO_ISDIR;
+
+        if (file.node.type === "character" && file.node.kind === "devnull") {
+          const total = iovViews.reduce((acc, buf) => acc + buf.byteLength, 0);
+          view.setUint32(nwritten, total, true);
+          return WASIAbi.WASI_ESUCCESS;
+        }
+
+        let pos = offset;
+        const dataToWrite = iovViews.reduce(
+          (acc, buf) => acc + buf.byteLength,
+          0,
+        );
+        const requiredLength = pos + dataToWrite;
+        let newContent: DataThing;
+
+        if (requiredLength > file.node.content.byteLength) {
+          newContent = new Uint8Array(requiredLength);
+          newContent.set(file.node.content, 0);
+        } else {
+          newContent = file.node.content;
+        }
+
+        for (const buf of iovViews) {
+          newContent.set(buf, pos);
+          pos += buf.byteLength;
+          totalWritten += buf.byteLength;
+        }
+
+        file.node.content = newContent;
+        if (move) file.position = pos;
+        view.setUint32(nwritten, totalWritten, true);
+        return WASIAbi.WASI_ESUCCESS;
+    }
 
     return {
       fd_pread: (fd: number, iovs: number, iovsLen: number, offset: bigint, nread: number): number => {
@@ -717,50 +762,33 @@ export function useMemoryFS(
         iovsLen: number,
         nwritten: number,
       ) => {
-        const view = memoryView();
-        const iovViews = abi.iovViews(view, iovs, iovsLen);
         const file = getFileFromFD(fd);
         if (!file) return WASIAbi.WASI_ERRNO_BADF;
-        let totalWritten = 0;
+        pwrite(file, iovs, iovsLen, file.position, nwritten, false)
+      },
+      fd_pwrite(fd: number, iovs: number, iovsLen: number, offset: bigint, nwritten: number) {
+        const file = getFileFromFD(fd);
+        if (!file) return WASIAbi.WASI_ERRNO_BADF;
+        pwrite(file, iovs, iovsLen, Number(offset), nwritten, true)
+      },
+      fd_filestat_set_size(fd: number, length: bigint): number {
+        const file = getFileFromFD(fd)
+        if (file?.node.type != "file") return WASIAbi.WASI_ERRNO_BADF
 
-        if (file.node.type === "character" && file.node.kind === "stdio") {
-          const bytesWritten = file.node.entry.writev(iovViews);
-          view.setUint32(nwritten, bytesWritten, true);
-          return WASIAbi.WASI_ESUCCESS;
-        }
-
-        if (file.node.type === "dir") return WASIAbi.WASI_ERRNO_ISDIR;
-
-        if (file.node.type === "character" && file.node.kind === "devnull") {
-          const total = iovViews.reduce((acc, buf) => acc + buf.byteLength, 0);
-          view.setUint32(nwritten, total, true);
-          return WASIAbi.WASI_ESUCCESS;
-        }
-
-        let pos = file.position;
-        const dataToWrite = iovViews.reduce(
-          (acc, buf) => acc + buf.byteLength,
-          0,
-        );
-        const requiredLength = pos + dataToWrite;
-        let newContent: DataThing;
-
-        if (requiredLength > file.node.content.byteLength) {
-          newContent = new Uint8Array(requiredLength);
-          newContent.set(file.node.content, 0);
+        let content = file.node.content;
+        const len = Number(length)
+        if (len == content.length) {
+        } if (len <= content.length) {
+          content = new Uint8Array(content.buffer, 0, len)
+        } else if (content.buffer.byteLength >= len) {
+          const prevLen = content.length
+          content = new Uint8Array(content.buffer, 0, len)
+          content.fill(0, prevLen)
         } else {
-          newContent = file.node.content;
+          content = new Uint8Array(len)
+          content.set(file.node.content)
         }
-
-        for (const buf of iovViews) {
-          newContent.set(buf, pos);
-          pos += buf.byteLength;
-          totalWritten += buf.byteLength;
-        }
-
-        file.node.content = newContent;
-        file.position = pos;
-        view.setUint32(nwritten, totalWritten, true);
+        file.node.content = content
         return WASIAbi.WASI_ESUCCESS;
       },
 
