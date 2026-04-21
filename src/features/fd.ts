@@ -764,12 +764,12 @@ export function useMemoryFS(
       ) => {
         const file = getFileFromFD(fd);
         if (!file) return WASIAbi.WASI_ERRNO_BADF;
-        pwrite(file, iovs, iovsLen, file.position, nwritten, false)
+        return pwrite(file, iovs, iovsLen, file.position, nwritten, false)
       },
-      fd_pwrite(fd: number, iovs: number, iovsLen: number, offset: bigint, nwritten: number) {
+      fd_pwrite(fd: number, iovs: number, iovsLen: number, offset: bigint, nwritten: number): number {
         const file = getFileFromFD(fd);
         if (!file) return WASIAbi.WASI_ERRNO_BADF;
-        pwrite(file, iovs, iovsLen, Number(offset), nwritten, true)
+        return pwrite(file, iovs, iovsLen, Number(offset), nwritten, true)
       },
       fd_filestat_set_size(fd: number, length: bigint): number {
         const file = getFileFromFD(fd)
